@@ -177,13 +177,14 @@ static int ov5693_set_fmt(struct v4l2_subdev *sd,
 	fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
 	fmt->field = V4L2_FIELD_NONE;
 
+#if 0
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
 		*v4l2_subdev_get_try_format(sd, cfg, format->pad) = format->format;
 		goto out;
 	} else {
 		dev->curr_mode = mode;
 	}
-
+#endif
 
 	/*
 	 * After sensor settings are set to HW, sometimes stream is started.
@@ -197,7 +198,7 @@ static int ov5693_set_fmt(struct v4l2_subdev *sd,
 		/*goto out;*/
 	/*}*/
 
-out:
+//out:
 	mutex_unlock(&dev->input_lock);
 	return ret;
 }
@@ -205,10 +206,10 @@ static int ov5693_get_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *format)
 {
-	struct ov5693_device *dev = to_ov5693_sensor(sd);
+	//struct ov5693_device *dev = to_ov5693_sensor(sd);
 	if (format->pad)
 		return -EINVAL;
-
+/*
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
 		format->format = *v4l2_subdev_get_try_format(&dev->sd, cfg,
 							  format->pad);
@@ -218,7 +219,7 @@ static int ov5693_get_fmt(struct v4l2_subdev *sd,
 		format->format.code = MEDIA_BUS_FMT_SBGGR10_1X10;
 		format->format.field = V4L2_FIELD_NONE;
 	}
-
+*/
 	return 0;
 }
 
@@ -250,10 +251,10 @@ static int ov5693_check_sensor_id(struct i2c_client *client)
 
 	ret = ov5693_read_reg(client, OV5693_8BIT,
 					OV5693_SC_CMMN_SUB_ID, &high);
-	revision = (u8) high & 0x0f;
+	revision = (u8) high;
 
-	dev_dbg(&client->dev, "sensor_revision = 0x%x\n", revision);
-	dev_dbg(&client->dev, "detect ov5693 success\n");
+	dev_info(&client->dev, "sensor_revision = 0x%x\n", revision);
+	dev_info(&client->dev, "detect ov5693 success\n");
 	return 0;
 }
 
@@ -421,11 +422,6 @@ static const struct media_entity_operations ov5693_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
-static int match_depend(struct device *dev, const void *data)
-{
-	return (dev && dev->fwnode == data) ? 1 : 0;
-}
-
 static int __ov5693_power_off(struct ov5693_device *ov5693)
 {
 	gpiod_set_value_cansleep(ov5693->xshutdn, 0);
@@ -449,17 +445,19 @@ static int __ov5693_power_on(struct ov5693_device *ov5693)
 	struct acpi_handle *dev_handle = ACPI_HANDLE(&client->dev);
 	struct acpi_handle_list dep_devices;
 	acpi_status status;
+	struct acpi_device_physical_node *phys;
+	struct acpi_device *pmic;
 	struct device *dev;
 	int ret;
 	int i;
 
 	// TODO: Refactor this into own function
-	// Get dependant INT3472 device
 	if (!acpi_has_method(dev_handle, "_DEP")) {
 		printk("No dependant devices\n");
 		return -100;
 	}
 
+	/* Locate the INT3472 PMIC from the ACPI dependencies. */
 	status = acpi_evaluate_reference(dev_handle, "_DEP", NULL,
 					 &dep_devices);
 	if (ACPI_FAILURE(status)) {
@@ -468,7 +466,6 @@ static int __ov5693_power_on(struct ov5693_device *ov5693)
 	}
 
 	for (i = 0; i < dep_devices.count; i++) {
-		struct acpi_device *device;
 		struct acpi_device_info *info;
 
 		status = acpi_get_object_info(dep_devices.handles[i], &info);
@@ -478,19 +475,38 @@ static int __ov5693_power_on(struct ov5693_device *ov5693)
 		}
 
 		if (info->valid & ACPI_VALID_HID &&
-				!strcmp(info->hardware_id.string, "INT3472")) {
-			if (acpi_bus_get_device(dep_devices.handles[i], &device))
+		    !strcmp(info->hardware_id.string, "INT3472")) {
+			if (acpi_bus_get_device(dep_devices.handles[i], &pmic))
 				return -ENODEV;
 
-			dev = bus_find_device(&platform_bus_type, NULL,
-					&device->fwnode, match_depend);
-			if (dev) {
-				dev_info(&client->dev, "Dependent platform device found %s\n",
-					dev_name(dev));
-				break;
-			}
+			break;
 		}
 	}
+
+	if (!pmic) {
+		dev_info(&client->dev, "no PMIC found\n");
+		return -ENODEV;
+	}
+
+	/*
+	 * HACK: We know that the PMIC is a "discrete" PMIC, an ACPI device
+	 * that just serves as a container to list system GPIOs.
+	 *
+	 * The ACPI device has no fwnode, nor does it have a platform device.
+	 * This prevents fetching GPIOs. It however seems to be backed by the
+	 * PCI root complex (pci0000:00/0000:00:00.0) as its physical device,
+	 * and that device has its fwnode set to \_SB.PCI0.DSC1. Whether this
+	 * is correct or not is unknown, let's just get the physical device and
+	 * move on for now.
+	 */
+	phys = list_first_entry_or_null(&pmic->physical_node_list,
+					struct acpi_device_physical_node, node);
+	if (!phys) {
+		dev_info(&client->dev, "PMIC has no physical node\n");
+		return -ENODEV;
+	}
+
+	dev = phys->dev;
 
 	ov5693->xshutdn = gpiod_get_index(dev, NULL, 0, GPIOD_ASIS);
 	if (IS_ERR(ov5693->xshutdn)) {
@@ -504,7 +520,7 @@ static int __ov5693_power_on(struct ov5693_device *ov5693)
 		return -EINVAL;
 	}
 
-	ov5693->led_gpio = gpiod_get_index(dev, NULL, 2, GPIOD_ASIS);
+	ov5693->led_gpio = gpiod_get_index(dev, NULL, 3, GPIOD_ASIS);
 	if (IS_ERR(ov5693->led_gpio)) {
 		printk("Couldn't get GPIO 2\n");
 		return -EINVAL;
@@ -531,7 +547,7 @@ static int __ov5693_power_on(struct ov5693_device *ov5693)
 
 	// TODO: This doesn't really need to be here.
 	// Setting this to 1 is mostly just fun cause you can make a light turn on :)
-	/*gpiod_set_value_cansleep(ov5693->led_gpio, 1);*/
+	gpiod_set_value_cansleep(ov5693->led_gpio, 1);
 
 	// TODO: I don't know if this is actually needed
 	usleep_range(10000, 11000);
@@ -668,6 +684,10 @@ static int ov5693_probe(struct i2c_client *client,
 	ret = ov5693_check_sensor_id(client);
 	if (ret)
 		goto out;
+
+	 __ov5693_power_off(dev);
+
+	return 0;
 
 	ret = ov5693_init_controls(dev);
 	if (ret)
