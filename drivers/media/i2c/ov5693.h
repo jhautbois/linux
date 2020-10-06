@@ -181,6 +181,7 @@ struct ov5693_device {
 
 	//struct timespec timestamp_t_focus_abs;
 	int vt_pix_clk_freq_mhz;
+	int fmt_idx;
 	int run_mode;
 	int otp_size;
 	u8 *otp_data;

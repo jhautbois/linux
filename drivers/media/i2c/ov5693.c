@@ -18,6 +18,26 @@
 
 #include "ov5693.h"
 
+#define __cci_delay(t) \
+	do { \
+		if ((t) < 10) { \
+			usleep_range((t) * 1000, ((t) + 1) * 1000); \
+		} else { \
+			msleep((t)); \
+		} \
+	} while (0)
+
+/* Value 30ms reached through experimentation on byt ecs.
+ * The DS specifies a much lower value but when using a smaller value
+ * the I2C bus sometimes locks up permanently when starting the camera.
+ * This issue could not be reproduced on cht, so we can reduce the
+ * delay value to a lower value when insmod.
+ */
+static uint up_delay = 30;
+module_param(up_delay, uint, 0644);
+MODULE_PARM_DESC(up_delay,
+		 "Delay prior to the first CCI transaction for ov5693");
+
 static const uint32_t ov5693_embedded_effective_size = 28;
 
 /* i2c read/write stuff */
@@ -157,14 +177,95 @@ static const struct v4l2_ctrl_ops ctrl_ops = {
 	.s_ctrl = ov5693_s_ctrl,
 };
 
+static int get_resolution_index(int w, int h)
+{
+	int i;
+
+	for (i = 0; i < N_RES; i++) {
+		if (w != ov5693_res[i].width)
+			continue;
+		if (h != ov5693_res[i].height)
+			continue;
+
+		return i;
+	}
+
+	return -1;
+}
+
+/* Control GPIOs defined in dep_dev _CRS */
+static int gpio_crs_ctrl(struct v4l2_subdev *sd, bool flag)
+{
+	struct ov5693_device *sensor = to_ov5693_sensor(sd);
+
+	gpiod_set_value_cansleep(sensor->xshutdn, flag);
+	gpiod_set_value_cansleep(sensor->pwdnb, flag);
+	if (!IS_ERR(sensor->led_gpio))
+		gpiod_set_value_cansleep(sensor->led_gpio, flag);
+
+	return 0;
+}
+
+static int __power_up(struct v4l2_subdev *sd)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	int ret;
+
+	ret = gpio_crs_ctrl(sd, true);
+	if (ret)
+		goto fail_power;
+
+	__cci_delay(up_delay);
+
+	return 0;
+
+fail_power:
+	gpio_crs_ctrl(sd, false);
+	dev_err(&client->dev, "sensor power-up failed\n");
+
+	return ret;
+}
+
+static int power_down(struct v4l2_subdev *sd)
+{
+	struct ov5693_device *dev = to_ov5693_sensor(sd);
+	int ret = 0;
+
+	ret = gpio_crs_ctrl(sd, false);
+
+	return ret;
+}
+
+static int power_up(struct v4l2_subdev *sd)
+{
+	static const int retry_count = 4;
+	int i, ret;
+
+	for (i = 0; i < retry_count; i++) {
+		ret = __power_up(sd);
+		if (!ret)
+			return 0;
+
+		power_down(sd);
+	}
+	return ret;
+}
+
 static int ov5693_set_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *fmt = &format->format;
 	struct ov5693_device *dev = to_ov5693_sensor(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov5693_resolution *mode;
-	int ret = 0;
+	int ret = 0, cnt;
+
+	if (format->pad)
+		return -EINVAL;
+
+	if (!fmt)
+		return -EINVAL;
 
 	mutex_lock(&dev->input_lock);
 
@@ -177,49 +278,77 @@ static int ov5693_set_fmt(struct v4l2_subdev *sd,
 	fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
 	fmt->field = V4L2_FIELD_NONE;
 
-#if 0
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-		*v4l2_subdev_get_try_format(sd, cfg, format->pad) = format->format;
-		goto out;
-	} else {
-		dev->curr_mode = mode;
+		cfg->try_fmt = *fmt;
+		ret = 0;
+		goto mutex_unlock;
 	}
+
+	dev->curr_mode = mode;
+
+	dev->fmt_idx = get_resolution_index(fmt->width, fmt->height);
+	if (dev->fmt_idx == -1) {
+		dev_err(&client->dev, "get resolution fail\n");
+		ret = -EINVAL;
+		goto mutex_unlock;
+	}
+
+	for (cnt = 0; cnt < OV5693_POWER_UP_RETRY_NUM; cnt++) {
+		power_down(sd);
+		ret = power_up(sd);
+		if (ret) {
+			dev_err(&client->dev, "power up failed\n");
+			continue;
+		}
+
+#if 0
+		mutex_unlock(&dev->input_lock);
+		ov5693_init(sd);
+		mutex_lock(&dev->input_lock);
+		ret = startup(sd);
+		if (ret)
+			dev_err(&client->dev, " startup() FAILED!\n");
+		else
 #endif
+			break;
+	}
+	if (cnt == OV5693_POWER_UP_RETRY_NUM) {
+		dev_err(&client->dev, "power up failed, gave up\n");
+		goto mutex_unlock;
+	}
 
 	/*
 	 * After sensor settings are set to HW, sometimes stream is started.
 	 * This would cause ISP timeout because ISP is not ready to receive
 	 * data yet. So add stop streaming here.
 	 */
-	/*ret = ov5693_write_reg(client, OV5693_8BIT, OV5693_SW_STREAM,*/
-				/*OV5693_STOP_STREAMING);*/
-	/*if (ret) {*/
-		/*dev_warn(&client->dev, "ov5693 stream off err\n");*/
-		/*goto out;*/
-	/*}*/
+	ret = ov5693_write_reg(client, OV5693_8BIT, OV5693_SW_STREAM,
+			       OV5693_STOP_STREAMING);
+	if (ret)
+		dev_warn(&client->dev, "ov5693 stream off err\n");
 
-//out:
+mutex_unlock:
 	mutex_unlock(&dev->input_lock);
 	return ret;
 }
+
 static int ov5693_get_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *format)
 {
-	//struct ov5693_device *dev = to_ov5693_sensor(sd);
+	struct v4l2_mbus_framefmt *fmt = &format->format;
+	struct ov5693_device *ov5693 = to_ov5693_sensor(sd);
 	if (format->pad)
 		return -EINVAL;
-/*
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-		format->format = *v4l2_subdev_get_try_format(&dev->sd, cfg,
-							  format->pad);
-	} else {
-		format->format.width = dev->curr_mode->width;
-		format->format.height = dev->curr_mode->height;
-		format->format.code = MEDIA_BUS_FMT_SBGGR10_1X10;
-		format->format.field = V4L2_FIELD_NONE;
-	}
-*/
+
+	if (!fmt)
+		return -EINVAL;
+
+	fmt->width = ov5693->curr_mode->width;
+	fmt->height = ov5693->curr_mode->height;
+	fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+	fmt->field = V4L2_FIELD_NONE;
+
 	return 0;
 }
 
@@ -335,23 +464,24 @@ static int ov5693_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	struct ov5693_device *dev = to_ov5693_sensor(sd);
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&dev->input_lock);
 
 	if (enable) {
+#if 0
 		ret = pm_runtime_get_sync(&client->dev);
 		if (ret < 0) {
 			pm_runtime_put_noidle(&client->dev);
 			goto out;
 		}
-
+#endif
 		ret = ov5693_start_streaming(dev);
 		if (ret)
 			goto out;
 	} else {
 		ret = ov5693_stop_streaming(dev);
-		pm_runtime_put(&client->dev);
+//		pm_runtime_put(&client->dev);
 	}
 
 out:
@@ -560,15 +690,16 @@ static int ov5693_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct ov5693_device *dev = to_ov5693_sensor(sd);
 	dev_dbg(&client->dev, "ov5693_remove...\n");
-
+#if 0
 	pm_runtime_disable(&client->dev);
+#endif
 
-	__ov5693_power_off(dev);
-
+	//__ov5693_power_off(dev);
 	v4l2_async_unregister_subdev(sd);
 
 	media_entity_cleanup(&dev->sd.entity);
 	v4l2_ctrl_handler_free(&dev->ctrl_handler);
+
 	kfree(dev);
 
 	return 0;
@@ -643,11 +774,36 @@ static int ov5693_configure_regulators(struct ov5693_device *dev)
 				       dev->supplies);
 }
 
-static int ov5693_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+/* Open sub-device */
+static int ov5693_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
+{
+	struct ov5693_device *ov5693 = to_ov5693_sensor(sd);
+	struct v4l2_mbus_framefmt *try_fmt =
+				v4l2_subdev_get_try_format(sd, fh->pad, 0);
+
+	mutex_lock(&ov5693->input_lock);
+
+	/* Initialize try_fmt */
+	try_fmt->width = ov5693->curr_mode->width;
+	try_fmt->height = ov5693->curr_mode->height;
+	try_fmt->code = MEDIA_BUS_FMT_SBGGR10_1X10;
+	try_fmt->field = V4L2_FIELD_NONE;
+
+	/* No crop or compose */
+	mutex_unlock(&ov5693->input_lock);
+
+	return 0;
+}
+
+static const struct v4l2_subdev_internal_ops ov5693_internal_ops = {
+	.open = ov5693_open,
+};
+
+static int ov5693_probe(struct i2c_client *client)
 {
 	struct ov5693_device *dev;
 	int ret = 0;
+	static int already_there = 0;
 
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
 	if (!dev) {
@@ -667,27 +823,28 @@ static int ov5693_probe(struct i2c_client *client,
 	dev->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	dev->sd.entity.ops = &ov5693_subdev_entity_ops;
 
-	ret = ov5693_configure_regulators(dev);
-	if (ret) {
-		dev_err(&client->dev, "Failed to get power regulators\n");
-		return ret;
-	}
+	if (already_there == 0) {
+		ret = ov5693_configure_regulators(dev);
+		if (ret) {
+			dev_err(&client->dev, "Failed to get power regulators\n");
+			return ret;
+		}
 
-	// Power on
-	ret = __ov5693_power_on(dev);
-	if (ret)
-	{
-		dev_err(&client->dev, "could not power on ov5693\n");
-		goto out;
+		// Power on
+		ret = __ov5693_power_on(dev);
+		if (ret)
+		{
+			dev_err(&client->dev, "could not power on ov5693: %d\n", ret);
+			goto out;
+		}
+		already_there = 200;
 	}
 
 	ret = ov5693_check_sensor_id(client);
 	if (ret)
 		goto out;
 
-	 __ov5693_power_off(dev);
-
-	return 0;
+//	 __ov5693_power_off(dev);
 
 	ret = ov5693_init_controls(dev);
 	if (ret)
@@ -706,11 +863,11 @@ static int ov5693_probe(struct i2c_client *client,
 			ret);
 		goto out;
 	}
-
+#if 0
 	pm_runtime_set_active(&client->dev);
 	pm_runtime_enable(&client->dev);
 	pm_runtime_idle(&client->dev);
-
+#endif
 out:
 	if (ret)
 		ov5693_remove(client);
@@ -747,7 +904,7 @@ static struct i2c_driver ov5693_i2c_driver = {
 		.pm = &ov5693_pm_ops,
 		.acpi_match_table = ACPI_PTR(ov5693_acpi_ids),
 	},
-	.probe = ov5693_probe,
+	.probe_new = ov5693_probe,
 	.remove = ov5693_remove,
 };
 
