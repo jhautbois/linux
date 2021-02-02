@@ -4,6 +4,7 @@
  * Author: Paul Kocialkowski <paul.kocialkowski@bootlin.com>
  */
 
+#include <linux/acpi.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/device.h>
@@ -18,10 +19,6 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-image-sizes.h>
 #include <media/v4l2-mediabus.h>
-
-/* Clock rate */
-
-#define OV5648_XVCLK_RATE			24000000
 
 /* Register definitions */
 
@@ -490,6 +487,13 @@
 #define OV5648_AWB_FRAME_COUNT_REG		0x518f
 #define OV5648_AWB_BASE_MAN_REG			0x51df
 
+/* Clock rate */
+			
+static const unsigned long ov5648_xvclk_rates[] = {
+	19200000,
+	24000000,
+};
+
 /* Macros */
 
 #define ov5648_subdev_sensor(subdev) \
@@ -938,6 +942,7 @@ static const struct ov5648_register_value ov5648_init_sequence[] = {
 static const s64 ov5648_link_freq_menu[] = {
 	210000000,
 	168000000,
+	134400000,
 };
 
 static const char *const ov5648_test_pattern_menu[] = {
@@ -2449,11 +2454,12 @@ complete:
 static int ov5648_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
-	struct fwnode_handle *handle;
+	struct fwnode_handle *handle, *fwnode = dev_fwnode(dev);
 	struct ov5648_sensor *sensor;
 	struct v4l2_subdev *subdev;
 	struct media_pad *pad;
 	unsigned long rate;
+	unsigned int i;
 	int ret;
 
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
@@ -2465,7 +2471,9 @@ static int ov5648_probe(struct i2c_client *client)
 
 	/* Graph Endpoint */
 
-	handle = fwnode_graph_get_next_endpoint(dev_fwnode(dev), NULL);
+	handle = fwnode_graph_get_next_endpoint(fwnode, NULL);
+	if (!handle && !IS_ERR(fwnode->secondary))
+		handle = fwnode_graph_get_next_endpoint(fwnode->secondary, NULL);
 	if (!handle) {
 		dev_err(dev, "unable to find enpoint node\n");
 		return -EINVAL;
@@ -2522,7 +2530,7 @@ static int ov5648_probe(struct i2c_client *client)
 
 	/* External Clock */
 
-	sensor->xvclk = devm_clk_get(dev, NULL);
+	sensor->xvclk = devm_clk_get(dev, "xvclk");
 	if (IS_ERR(sensor->xvclk)) {
 		dev_err(dev, "failed to get external clock\n");
 		ret = PTR_ERR(sensor->xvclk);
@@ -2530,7 +2538,11 @@ static int ov5648_probe(struct i2c_client *client)
 	}
 
 	rate = clk_get_rate(sensor->xvclk);
-	if (rate != OV5648_XVCLK_RATE) {
+	for (i = 0; i < ARRAY_SIZE(ov5648_xvclk_rates); i++)
+		if (rate == ov5648_xvclk_rates[i])
+			break;
+
+	if (i == ARRAY_SIZE(ov5648_xvclk_rates)) {
 		dev_err(dev, "clock rate %lu Hz is unsupported\n", rate);
 		ret = -EINVAL;
 		goto error_endpoint;
@@ -2621,10 +2633,17 @@ static const struct of_device_id ov5648_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ov5648_of_match);
 
+static const struct acpi_device_id ov5648_acpi_match[] = {
+	{ "OVTI5648", },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, ov5648_acpi_match);
+
 static struct i2c_driver ov5648_driver = {
 	.driver = {
 		.name = "ov5648",
 		.of_match_table = ov5648_of_match,
+		.acpi_match_table = ov5648_acpi_match,
 		.pm = &ov5648_pm_ops,
 	},
 	.probe_new = ov5648_probe,
