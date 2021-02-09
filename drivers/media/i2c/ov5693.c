@@ -947,6 +947,10 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 		return ov5693_flip_horz_configure(dev, !!ctrl->val);
 	case V4L2_CID_VFLIP:
 		return ov5693_flip_vert_configure(dev, !!ctrl->val);
+	case V4L2_CID_VBLANK:
+		ret = ov5693_write_reg(client, OV5693_16BIT, OV5693_TIMING_VTS_H,
+				       dev->mode->height + ctrl->val);
+		break;
 	default:
 		ret = -EINVAL;
 	}
@@ -1612,6 +1616,7 @@ static int ov5693_init_controls(struct ov5693_device *ov5693)
 	unsigned int i;
 	int ret;
 	int hblank;
+	int vblank;
 
 	ret = v4l2_ctrl_handler_init(&ov5693->ctrl_handler,
 				     ARRAY_SIZE(ov5693_controls));
@@ -1657,11 +1662,16 @@ static int ov5693_init_controls(struct ov5693_device *ov5693)
 	v4l2_ctrl_new_std(&ov5693->ctrl_handler, ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
 
 	hblank = OV5693_PPL_DEFAULT - ov5693->mode->width;
-	ov5693->hblank = v4l2_ctrl_new_std(&ov5693->ctrl_handler, ops,
+	ov5693->ctrls.hblank = v4l2_ctrl_new_std(&ov5693->ctrl_handler, ops,
 					   V4L2_CID_HBLANK, hblank, hblank,
 					   1, hblank);
-	if (ov5693->hblank)
-		ov5693->hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	if (ov5693->ctrls.hblank)
+		ov5693->ctrls.hblank->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+
+	vblank = ov5693->mode->lines_per_frame - ov5693->mode->width;
+	ov5693->ctrls.vblank = v4l2_ctrl_new_std(&ov5693->ctrl_handler, ops,
+						 V4L2_CID_VBLANK, vblank, vblank,
+						 1, vblank);
 
 	/* Use same lock for controls as for everything else. */
 	ov5693->ctrl_handler.lock = &ov5693->input_lock;

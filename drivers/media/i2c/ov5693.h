@@ -270,7 +270,10 @@ struct ov5693_device {
 
 	bool has_vcm;
 
-	struct v4l2_ctrl *hblank;
+	struct ov5693_v4l2_ctrls {
+		struct v4l2_ctrl *hblank;
+		struct v4l2_ctrl *vblank;
+	} ctrls;
 };
 
 enum ov5693_tok_type {
