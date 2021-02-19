@@ -62,17 +62,17 @@ MODULE_PARM_DESC(up_delay,
 /* Exposure/gain */
 
 #define OV5693_EXPOSURE_CTRL_HH_REG		0x3500
-#define OV5693_EXPOSURE_CTRL_HH(v)		(((v) & GENMASK(18, 16)) >> 16)
+#define OV5693_EXPOSURE_CTRL_HH(v)		(((v) & GENMASK(14, 12)) >> 12)
 #define OV5693_EXPOSURE_CTRL_H_REG		0x3501
-#define OV5693_EXPOSURE_CTRL_H(v)		(((v) & GENMASK(15, 8)) >> 8)
+#define OV5693_EXPOSURE_CTRL_H(v)		(((v) & GENMASK(11, 4)) >> 4)
 #define OV5693_EXPOSURE_CTRL_L_REG		0x3502
-#define OV5693_EXPOSURE_CTRL_L(v)		((v) & GENMASK(7, 0))
+#define OV5693_EXPOSURE_CTRL_L(v)		((v) & GENMASK(3, 0) << 4)
 #define OV5693_EXPOSURE_GAIN_MANUAL_REG		0x3509
 
 #define OV5693_GAIN_CTRL_H_REG			0x3504
-#define OV5693_GAIN_CTRL_H(v)			(((v) & GENMASK(9, 8)) >> 8)
+#define OV5693_GAIN_CTRL_H(v)			(((v >> 4) & GENMASK(2, 0)))
 #define OV5693_GAIN_CTRL_L_REG			0x3505
-#define OV5693_GAIN_CTRL_L(v)			((v) & GENMASK(7, 0))
+#define OV5693_GAIN_CTRL_L(v)			((v << 4) & GENMASK(7, 4))
 
 #define OV5693_FORMAT1_REG			0x3820
 #define OV5693_FORMAT1_FLIP_VERT_ISP_EN		BIT(2)
@@ -680,6 +680,8 @@ static int ov5693_q_exposure(struct v4l2_subdev *sd, s32 *value)
 		goto err;
 
 	*value = reg_v + (((u32)reg_v2 << 16));
+
+
 err:
 	return ret;
 }
@@ -773,6 +775,7 @@ static int ov5693_get_exposure(struct ov5693_device *sensor)
 {
 	u16 reg_v, reg_v2;
 	int ret = 0;
+	u16 blc0, blc1, blc2, blc3;
 
 	/* get exposure */
 	ret = ov5693_read_reg(sensor->i2c_client, OV5693_8BIT,
@@ -794,7 +797,17 @@ static int ov5693_get_exposure(struct ov5693_device *sensor)
 	if (ret)
 		return ret;
 
-	printk("exposure set to: %u\n", reg_v + (((u32)reg_v2 << 16)));
+	//printk("exposure set to: %u\n", reg_v + (((u32)reg_v2 << 16)));
+	ov5693_read_reg(sensor->i2c_client, OV5693_16BIT,
+			0x402c, &blc0);
+	ov5693_read_reg(sensor->i2c_client, OV5693_16BIT,
+			0x402e, &blc1);
+	ov5693_read_reg(sensor->i2c_client, OV5693_16BIT,
+			0x4030, &blc2);
+	ov5693_read_reg(sensor->i2c_client, OV5693_16BIT,
+			0x4032, &blc3);
+	//printk("BLC levels: %u, %u, %u, %u\n", blc0, blc1, blc2, blc3);
+
 	return ret;
 }
 
@@ -803,6 +816,11 @@ static int ov5693_exposure_configure(struct ov5693_device *sensor, u32 exposure)
 	int ret;
 
 	ov5693_get_exposure(sensor);
+	/*
+	 * The control for exposure seems to be in units of lines, but the chip
+	 * datasheet specifies exposure is in units of 1/16th of a line.
+	 */
+	exposure = exposure * 16;
 	ret = ov5693_write_reg(sensor->i2c_client, OV5693_8BIT,
 			OV5693_EXPOSURE_CTRL_HH_REG, OV5693_EXPOSURE_CTRL_HH(exposure));
 	if (ret)
@@ -880,23 +898,27 @@ static int ov5693_gain_configure(struct ov5693_device *sensor, u32 gain)
 	return 0;
 }
 
-static int ov5693_analog_gain_configure(struct ov5693_device *sensor, u32 gain)
+static int ov5693_analog_gain_configure(struct ov5693_device *ov5693, u32 gain)
 {
 	int ret;
 
-	/* Analog gain */
-	ret = ov5693_write_reg(sensor->i2c_client, OV5693_8BIT,
-				OV5693_AGC_L, gain & 0xff);
+	/*
+	 * As with exposure, the lowest 4 bits are fractional bits. Setting
+	 * those is not supported, so we have a tiny bit of bit shifting to
+	 * do.
+	 */
+	ret = ov5693_write_reg(ov5693->i2c_client, OV5693_8BIT,
+				OV5693_AGC_L, OV5693_GAIN_CTRL_L(gain));
 	if (ret) {
-		dev_err(&sensor->i2c_client->dev, "%s: write %x error, aborted\n",
+		dev_err(&ov5693->i2c_client->dev, "%s: write %x error, aborted\n",
 			__func__, OV5693_AGC_L);
 		return ret;
 	}
 
-	ret = ov5693_write_reg(sensor->i2c_client, OV5693_8BIT,
-				OV5693_AGC_H, (gain >> 8) & 0xff);
+	ret = ov5693_write_reg(ov5693->i2c_client, OV5693_8BIT,
+				OV5693_AGC_H, OV5693_GAIN_CTRL_H(gain));
 	if (ret) {
-		dev_err(&sensor->i2c_client->dev, "%s: write %x error, aborted\n",
+		dev_err(&ov5693->i2c_client->dev, "%s: write %x error, aborted\n",
 			__func__, OV5693_AGC_H);
 		return ret;
 	}
@@ -910,6 +932,16 @@ static int ov5693_s_ctrl(struct v4l2_ctrl *ctrl)
 	    container_of(ctrl->handler, struct ov5693_device, ctrl_handler);
 	struct i2c_client *client = v4l2_get_subdevdata(&dev->sd);
 	int ret = 0;
+
+	/* If VBLANK is altered we need to update exposure to compensate */
+	if (ctrl->id == V4L2_CID_VBLANK) {
+		int exposure_max;
+		exposure_max = dev->mode->lines_per_frame - 8;
+		__v4l2_ctrl_modify_range(dev->ctrls.exposure, dev->ctrls.exposure->minimum,
+					 exposure_max, dev->ctrls.exposure->step,
+					 dev->ctrls.exposure->val < exposure_max ?
+					 dev->ctrls.exposure->val : exposure_max);
+	}
 
 	switch (ctrl->id) {
 	case V4L2_CID_FOCUS_ABSOLUTE:
@@ -1617,6 +1649,7 @@ static int ov5693_init_controls(struct ov5693_device *ov5693)
 	int ret;
 	int hblank;
 	int vblank;
+	int exposure_max;
 
 	ret = v4l2_ctrl_handler_init(&ov5693->ctrl_handler,
 				     ARRAY_SIZE(ov5693_controls));
@@ -1647,9 +1680,9 @@ static int ov5693_init_controls(struct ov5693_device *ov5693)
 	}
 
 	/* Exposure */
-
-	v4l2_ctrl_new_std(&ov5693->ctrl_handler, ops, V4L2_CID_EXPOSURE, 16, 1048575, 16,
-			  512);
+	exposure_max = ov5693->mode->lines_per_frame - 8;
+	ov5693->ctrls.exposure = v4l2_ctrl_new_std(&ov5693->ctrl_handler, ops, V4L2_CID_EXPOSURE,
+			1, exposure_max, 1, 123);
 
 	/* Gain */
 

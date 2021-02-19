@@ -271,6 +271,7 @@ struct ov5693_device {
 	bool has_vcm;
 
 	struct ov5693_v4l2_ctrls {
+		struct v4l2_ctrl *exposure;
 		struct v4l2_ctrl *hblank;
 		struct v4l2_ctrl *vblank;
 	} ctrls;
