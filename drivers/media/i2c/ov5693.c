@@ -820,7 +820,6 @@ static int ov5693_exposure_configure(struct ov5693_device *sensor, u32 exposure)
 	 * The control for exposure seems to be in units of lines, but the chip
 	 * datasheet specifies exposure is in units of 1/16th of a line.
 	 */
-	exposure = exposure * 16;
 	ret = ov5693_write_reg(sensor->i2c_client, OV5693_8BIT,
 			OV5693_EXPOSURE_CTRL_HH_REG, OV5693_EXPOSURE_CTRL_HH(exposure));
 	if (ret)
