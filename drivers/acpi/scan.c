@@ -2017,7 +2017,7 @@ static int __acpi_dev_get_dependent_dev(struct acpi_dep_data *dep, void *data)
 	struct acpi_device *adev;
 	int ret;
 
-	ret = acpi_bus_get_device(dep->consumer, &adev);
+	ret = acpi_bus_get_device(dep->slave, &adev);
 	if (ret)
 		/* If we don't find an adev then we want to continue parsing */
 		return 0;
@@ -2032,13 +2032,13 @@ static int __acpi_dev_flag_dependency_met(struct acpi_dep_data *dep,
 {
 	struct acpi_device *adev;
 
-	acpi_bus_get_device(dep->consumer, &adev);
+	acpi_bus_get_device(dep->slave, &adev);
 	if (!adev)
 		return 0;
 
 	adev->dep_unmet--;
 	if (!adev->dep_unmet)
-		acpi_bus_attach(adev, true);
+		acpi_bus_attach(adev);
 
 	list_del(&dep->node);
 	kfree(dep);
@@ -2054,7 +2054,7 @@ void acpi_walk_dep_device_list(acpi_handle handle,
 
 	mutex_lock(&acpi_dep_list_lock);
 	list_for_each_entry_safe(dep, tmp, &acpi_dep_list, node) {
-		if (dep->supplier == handle) {
+		if (dep->master == handle) {
 			ret = callback(dep, data);
 			if (ret)
 				break;

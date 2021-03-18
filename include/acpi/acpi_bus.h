@@ -280,8 +280,8 @@ struct acpi_device_power {
 
 struct acpi_dep_data {
 	struct list_head node;
-	acpi_handle supplier;
-	acpi_handle consumer;
+	acpi_handle master;
+	acpi_handle slave;
 };
 
 /* Performance Management */
