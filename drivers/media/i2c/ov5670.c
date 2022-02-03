@@ -2465,14 +2465,14 @@ static const struct v4l2_subdev_core_ops ov5670_core_ops = {
 
 static void
 __ov5670_get_pad_crop(struct ov5670 *sensor,
-		      struct v4l2_subdev_state *state, unsigned int pad,
+		      struct v4l2_subdev_pad_config *cfg, unsigned int pad,
 		      enum v4l2_subdev_format_whence which, struct v4l2_rect *r)
 {
 	const struct ov5670_mode *mode = sensor->cur_mode;
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		*r = *v4l2_subdev_get_try_crop(&sensor->subdev, state, pad);
+		*r = *v4l2_subdev_get_try_crop(&sensor->sd, cfg, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		r->height = mode->height;
@@ -2484,7 +2484,7 @@ __ov5670_get_pad_crop(struct ov5670 *sensor,
 }
 
 static int ov5670_get_selection(struct v4l2_subdev *subdev,
-				struct v4l2_subdev_state *state,
+				struct v4l2_subdev_pad_config *cfg,
 				struct v4l2_subdev_selection *sel)
 {
 	struct ov5670 *sensor = to_ov5670(subdev);
@@ -2492,7 +2492,7 @@ static int ov5670_get_selection(struct v4l2_subdev *subdev,
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
 		mutex_lock(&sensor->mutex);
-			__ov5670_get_pad_crop(sensor, state, sel->pad,
+			__ov5670_get_pad_crop(sensor, cfg, sel->pad,
 					      sel->which, &sel->r);
 		mutex_unlock(&sensor->mutex);
 		break;
