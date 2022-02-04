@@ -47,6 +47,19 @@
 #define	ANALOG_GAIN_STEP		1
 #define	ANALOG_GAIN_DEFAULT		128
 
+/* mirror and flip registers */
+#define OV5670_FORMAT1_REG			0x3820
+#define OV5670_FORMAT1_FLIP_VERT_ISP_EN		BIT(2)
+#define OV5670_FORMAT1_FLIP_VERT_SENSOR_EN	BIT(1)
+#define OV5670_FORMAT2_REG			0x3821
+#define OV5670_FORMAT2_HSYNC_EN			BIT(6)
+#define OV5670_FORMAT2_FST_VBIN_EN		BIT(5)
+#define OV5670_FORMAT2_FST_HBIN_EN		BIT(4)
+#define OV5670_FORMAT2_ISP_HORZ_VAR2_EN		BIT(3)
+#define OV5670_FORMAT2_FLIP_HORZ_ISP_EN		BIT(2)
+#define OV5670_FORMAT2_FLIP_HORZ_SENSOR_EN	BIT(1)
+#define OV5670_FORMAT2_SYNC_HBIN_EN		BIT(0)
+
 /* OTP control registers */
 #define OV5670_REG_OTP_LOAD_CTRL	0x3d81
 #define OV5670_OTP_LOAD_ENABLE		BIT(0)
@@ -2007,6 +2020,44 @@ static int ov5670_update_digital_gain(struct ov5670 *ov5670, u32 d_gain)
 				OV5670_REG_VALUE_16BIT, d_gain);
 }
 
+static int ov5670_flip_vert_configure(struct ov5670 *sensor, bool enable)
+{
+	int ret;
+	u32 val;
+	u8 mask = OV5670_FORMAT1_FLIP_VERT_ISP_EN |
+		  OV5670_FORMAT1_FLIP_VERT_SENSOR_EN;
+
+	ret = ov5670_read_reg(sensor, OV5670_FORMAT1_REG,
+			      OV5670_REG_VALUE_08BIT, &val);
+	if (ret)
+		return ret;
+
+	val &= ~mask;
+	val |= enable ? mask : 0;
+
+	return ov5670_write_reg(sensor, OV5670_FORMAT1_REG,
+				OV5670_REG_VALUE_08BIT, val);
+}
+
+static int ov5670_flip_horz_configure(struct ov5670 *sensor, bool enable)
+{
+	int ret;
+	u32 val;
+	u8 mask = OV5670_FORMAT2_FLIP_HORZ_ISP_EN |
+		  OV5670_FORMAT2_FLIP_HORZ_SENSOR_EN;
+
+	ret = ov5670_read_reg(sensor, OV5670_FORMAT2_REG,
+			      OV5670_REG_VALUE_08BIT, &val);
+	if (ret)
+		return ret;
+
+	val &= ~mask;
+	val |= enable ? mask : 0;
+
+	return ov5670_write_reg(sensor, OV5670_FORMAT2_REG,
+				OV5670_REG_VALUE_08BIT, val);
+}
+
 static int ov5670_enable_test_pattern(struct ov5670 *ov5670, u32 pattern)
 {
 	u32 val;
@@ -2075,6 +2126,12 @@ static int ov5670_set_ctrl(struct v4l2_ctrl *ctrl)
 				       OV5670_REG_VALUE_16BIT,
 				       ov5670->cur_mode->height + ctrl->val);
 		break;
+	case V4L2_CID_HFLIP:
+		ret = ov5670_flip_horz_configure(ov5670, !!ctrl->val);
+		break;
+	case V4L2_CID_VFLIP:
+		ret = ov5670_flip_vert_configure(ov5670, !!ctrl->val);
+		break;
 	case V4L2_CID_TEST_PATTERN:
 		ret = ov5670_enable_test_pattern(ov5670, ctrl->val);
 		break;
@@ -2104,7 +2161,7 @@ static int ov5670_init_controls(struct ov5670 *ov5670)
 	int ret;
 
 	ctrl_hdlr = &ov5670->ctrl_handler;
-	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 8);
+	ret = v4l2_ctrl_handler_init(ctrl_hdlr, 10);
 	if (ret)
 		return ret;
 
@@ -2156,6 +2213,9 @@ static int ov5670_init_controls(struct ov5670 *ov5670)
 					     OV5670_EXPOSURE_MIN,
 					     exposure_max, OV5670_EXPOSURE_STEP,
 					     exposure_max);
+	/* Flip */
+	v4l2_ctrl_new_std(ctrl_hdlr, &ov5670_ctrl_ops, V4L2_CID_HFLIP, 0, 1, 1, 0);
+	v4l2_ctrl_new_std(ctrl_hdlr, &ov5670_ctrl_ops, V4L2_CID_VFLIP, 0, 1, 1, 0);
 
 	v4l2_ctrl_new_std_menu_items(ctrl_hdlr, &ov5670_ctrl_ops,
 				     V4L2_CID_TEST_PATTERN,
