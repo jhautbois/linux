@@ -9,6 +9,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-event.h>
+#include <media/v4l2-fwnode.h>
 
 #define OV5670_REG_CHIP_ID		0x300a
 #define OV5670_CHIP_ID			0x005670
@@ -2153,11 +2154,13 @@ static const struct v4l2_ctrl_ops ov5670_ctrl_ops = {
 /* Initialize control handlers */
 static int ov5670_init_controls(struct ov5670 *ov5670)
 {
+	struct i2c_client *client = v4l2_get_subdevdata(&ov5670->sd);
 	struct v4l2_ctrl_handler *ctrl_hdlr;
 	s64 vblank_max;
 	s64 vblank_def;
 	s64 vblank_min;
 	s64 exposure_max;
+	struct v4l2_fwnode_device_properties props;
 	int ret;
 
 	ctrl_hdlr = &ov5670->ctrl_handler;
@@ -2221,6 +2224,15 @@ static int ov5670_init_controls(struct ov5670 *ov5670)
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(ov5670_test_pattern_menu) - 1,
 				     0, 0, ov5670_test_pattern_menu);
+
+	/* set properties from fwnode (e.g. rotation, orientation) */
+	ret = v4l2_fwnode_device_parse(&client->dev, &props);
+	if (ret)
+		goto error;
+
+	ret = v4l2_ctrl_new_fwnode_properties(ctrl_hdlr, &ov5670_ctrl_ops, &props);
+	if (ret)
+		goto error;
 
 	if (ctrl_hdlr->error) {
 		ret = ctrl_hdlr->error;
