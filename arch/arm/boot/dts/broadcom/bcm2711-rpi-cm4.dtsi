@@ -111,3 +111,11 @@
 &wifi_pwrseq {
 	reset-gpios = <&expgpio 1 GPIO_ACTIVE_LOW>;
 };
+
+&csi0 {
+	status = "enabled";
+};
+
+&csi1 {
+	status = "enabled";
+};
