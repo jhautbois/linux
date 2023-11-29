@@ -6,6 +6,13 @@
 
 / {
 	model = "Raspberry Pi Compute Module 4 IO Board";
+	cam1_reg: regulator-cam1 {
+		compatible = "regulator-fixed";
+		regulator-name = "cam1-reg";
+		enable-active-high;
+		gpio = <&expgpio 5 GPIO_ACTIVE_HIGH>;
+	};
+
 };
 
 &ddc0 {
