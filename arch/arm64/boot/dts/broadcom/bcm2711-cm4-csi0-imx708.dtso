@@ -1,0 +1,82 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Definitions for IMX219 camera module on VC I2C bus
+
+/dts-v1/;
+/plugin/;
+
+&{/} {
+	cam1_clk: cam1_clk {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+
+&csi0 {
+	status = "okay";
+
+	port {
+		csi0_ep: endpoint {
+			remote-endpoint = <&cam_endpoint>;
+			clock-lanes = <0>;
+			data-lanes = <1 2>;
+			clock-noncontinuous;
+		};
+	};
+};
+
+&pwm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm0_0_gpio12 &pwm0_1_gpio13>;
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+};
+
+&i2c0_1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	camera@1a {
+		compatible = "sony,imx708";
+		reg = <0x1a>;
+
+		clocks = <&cam1_clk>;
+		clock-names = "xclk";
+
+		vana1-supply = <&cam1_reg>;     /* 2.8v */
+		vana2-supply = <&cam1_reg>;/* 1.8v */
+		vdig-supply = <&cam1_reg>;      /* 1.1v */
+		vddl-supply = <&cam1_reg>;      /* 1.8v */
+
+		rotation = <180>;
+		orientation = <2>;
+
+		lens-focus = <&vcm_node>;
+
+		port {
+			cam_endpoint: endpoint {
+				remote-endpoint = <&csi0_ep>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <450000000>;
+			};
+		};
+	};
+
+	vcm_node: dw9817@c {
+		compatible = "dongwoon,dw9817-vcm";
+		reg = <0x0c>;
+		VDD-supply = <&cam1_reg>;
+		status = "okay";
+	};
+
+};
+
+&i2c0mux {
+	status = "okay";
+};
