@@ -41,7 +41,7 @@ MODULE_PARM_DESC(qbc_adjust, "Quad Bayer broken line correction strength [0,2-5]
 
 #define IMX708_REG_ORIENTATION		0x101
 
-#define IMX708_INCLK_FREQ		24000000
+#define IMX708_XCLK_FREQ		24000000
 
 /* Default initial pixel rate, will get updated for each mode. */
 #define IMX708_INITIAL_PIXEL_RATE	590000000
@@ -828,8 +828,8 @@ struct imx708 {
 
 	struct v4l2_mbus_framefmt fmt;
 
-	struct clk *inclk;
-	u32 inclk_freq;
+	struct clk *xclk;
+	u32 xclk_freq;
 
 	struct gpio_desc *reset_gpio;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(imx708_supply_name)];
@@ -1635,7 +1635,7 @@ static int imx708_power_on(struct device *dev)
 		return ret;
 	}
 
-	ret = clk_prepare_enable(imx708->inclk);
+	ret = clk_prepare_enable(imx708->xclk);
 	if (ret) {
 		dev_err(&client->dev, "%s: failed to enable clock\n",
 			__func__);
@@ -1663,7 +1663,7 @@ static int imx708_power_off(struct device *dev)
 	gpiod_set_value_cansleep(imx708->reset_gpio, 0);
 	regulator_bulk_disable(ARRAY_SIZE(imx708_supply_name),
 			       imx708->supplies);
-	clk_disable_unprepare(imx708->inclk);
+	clk_disable_unprepare(imx708->xclk);
 
 	/* Force reprogramming of the common registers when powered up again. */
 	imx708->common_regs_written = false;
@@ -1985,17 +1985,17 @@ static int imx708_probe(struct i2c_client *client)
 	if (imx708_check_hwcfg(dev, imx708))
 		return -EINVAL;
 
-	/* Get system clock (inclk) */
-	imx708->inclk = devm_clk_get(dev, "inclk");
-	if (IS_ERR(imx708->inclk))
-		return dev_err_probe(dev, PTR_ERR(imx708->inclk),
-				     "failed to get inclk\n");
+	/* Get system clock (xclk) */
+	imx708->xclk = devm_clk_get(dev, "xclk");
+	if (IS_ERR(imx708->xclk))
+		return dev_err_probe(dev, PTR_ERR(imx708->xclk),
+				     "failed to get xclk\n");
 
-	imx708->inclk_freq = clk_get_rate(imx708->inclk);
-	if (imx708->inclk_freq != IMX708_INCLK_FREQ)
+	imx708->xclk_freq = clk_get_rate(imx708->xclk);
+	if (imx708->xclk_freq != IMX708_XCLK_FREQ)
 		return dev_err_probe(dev, -EINVAL,
 				     "inclk frequency not supported: %d Hz\n",
-				     imx708->inclk_freq);
+				     imx708->xclk_freq);
 
 	ret = imx708_get_regulators(imx708);
 	if (ret)
