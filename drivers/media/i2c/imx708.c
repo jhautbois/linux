@@ -129,7 +129,7 @@ MODULE_PARM_DESC(qbc_adjust, "Quad Bayer broken line correction strength [0,2-5]
 
 enum pad_types {
 	IMAGE_PAD,
-	METADATA_PAD,
+	//METADATA_PAD,
 	NUM_PADS
 };
 
@@ -1008,8 +1008,8 @@ static int imx708_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct imx708 *imx708 = to_imx708(sd);
 	struct v4l2_mbus_framefmt *try_fmt_img =
 		v4l2_subdev_state_get_format(fh->state, IMAGE_PAD);
-	struct v4l2_mbus_framefmt *try_fmt_meta =
-		v4l2_subdev_state_get_format(fh->state, METADATA_PAD);
+	// struct v4l2_mbus_framefmt *try_fmt_meta =
+	// 	v4l2_subdev_state_get_format(fh->state, METADATA_PAD);
 	struct v4l2_rect *try_crop;
 
 	mutex_lock(&imx708->mutex);
@@ -1026,10 +1026,10 @@ static int imx708_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	try_fmt_img->field = V4L2_FIELD_NONE;
 
 	/* Initialize try_fmt for the embedded metadata pad */
-	try_fmt_meta->width = IMX708_EMBEDDED_LINE_WIDTH;
-	try_fmt_meta->height = IMX708_NUM_EMBEDDED_LINES;
-	try_fmt_meta->code = MEDIA_BUS_FMT_META_10;
-	try_fmt_meta->field = V4L2_FIELD_NONE;
+	// try_fmt_meta->width = IMX708_EMBEDDED_LINE_WIDTH;
+	// try_fmt_meta->height = IMX708_NUM_EMBEDDED_LINES;
+	// try_fmt_meta->code = MEDIA_BUS_FMT_META_10;
+	// try_fmt_meta->field = V4L2_FIELD_NONE;
 
 	/* Initialize try_crop */
 	try_crop = v4l2_subdev_state_get_crop(fh->state, IMAGE_PAD);
@@ -1328,13 +1328,13 @@ static void imx708_update_image_pad_format(struct imx708 *imx708,
 	imx708_reset_colorspace(&fmt->format);
 }
 
-static void imx708_update_metadata_pad_format(struct v4l2_subdev_format *fmt)
-{
-	fmt->format.width = IMX708_EMBEDDED_LINE_WIDTH;
-	fmt->format.height = IMX708_NUM_EMBEDDED_LINES;
-	fmt->format.code = MEDIA_BUS_FMT_META_10;
-	fmt->format.field = V4L2_FIELD_NONE;
-}
+// static void imx708_update_metadata_pad_format(struct v4l2_subdev_format *fmt)
+// {
+// 	fmt->format.width = IMX708_EMBEDDED_LINE_WIDTH;
+// 	fmt->format.height = IMX708_NUM_EMBEDDED_LINES;
+// 	fmt->format.code = MEDIA_BUS_FMT_META_10;
+// 	fmt->format.field = V4L2_FIELD_NONE;
+// }
 
 static int imx708_get_pad_format(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_state *sd_state,
@@ -1361,7 +1361,7 @@ static int imx708_get_pad_format(struct v4l2_subdev *sd,
 						       fmt);
 			fmt->format.code = imx708_get_format_code(imx708);
 		} else {
-			imx708_update_metadata_pad_format(fmt);
+			//imx708_update_metadata_pad_format(fmt);
 		}
 	}
 
@@ -1411,7 +1411,7 @@ static int imx708_set_pad_format(struct v4l2_subdev *sd,
 			*framefmt = fmt->format;
 		} else {
 			/* Only one embedded data mode is supported */
-			imx708_update_metadata_pad_format(fmt);
+			//imx708_update_metadata_pad_format(fmt);
 		}
 	}
 
@@ -2038,7 +2038,7 @@ static int imx708_probe(struct i2c_client *client)
 
 	/* Initialize source pads */
 	imx708->pad[IMAGE_PAD].flags = MEDIA_PAD_FL_SOURCE;
-	imx708->pad[METADATA_PAD].flags = MEDIA_PAD_FL_SOURCE;
+//	imx708->pad[METADATA_PAD].flags = MEDIA_PAD_FL_SOURCE;
 
 	ret = media_entity_pads_init(&imx708->sd.entity, NUM_PADS, imx708->pad);
 	if (ret) {
