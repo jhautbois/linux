@@ -55,7 +55,7 @@
 		rotation = <180>;
 		orientation = <2>;
 
-		lens-focus = <&vcm_node>;
+/*		lens-focus = <&vcm_node>;*/
 
 		port {
 			cam_endpoint: endpoint {
@@ -72,7 +72,7 @@
 		compatible = "dongwoon,dw9817-vcm";
 		reg = <0x0c>;
 		VDD-supply = <&cam1_reg>;
-		status = "okay";
+		status = "disabled";
 	};
 
 };

@@ -9,6 +9,10 @@
 	cam1_reg: regulator-cam1 {
 		compatible = "regulator-fixed";
 		regulator-name = "cam1-reg";
+		startup-delay-us = <70000>;
+		off-on-delay-us = <30000>;
+		regulator-min-microvolt = <2700000>;
+		regulator-max-microvolt = <2700000>;
 		enable-active-high;
 		gpio = <&expgpio 5 GPIO_ACTIVE_HIGH>;
 	};
